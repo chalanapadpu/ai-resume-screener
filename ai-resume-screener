@@ -1,0 +1,106 @@
+import sqlite3
+import json
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+from config import Config
+
+def get_db_connection():
+    conn = sqlite3.connect(Config.DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS screenings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            candidate_name TEXT NOT NULL,
+            job_title TEXT NOT NULL,
+            overall_score REAL NOT NULL,
+            verdict TEXT NOT NULL,
+            engine_used TEXT NOT NULL,
+            filename TEXT,
+            result_json TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def save_screening(
+    candidate_name: str,
+    job_title: str,
+    overall_score: float,
+    verdict: str,
+    engine_used: str,
+    filename: str,
+    result_data: Dict[str, Any]
+) -> int:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    cursor.execute("""
+        INSERT INTO screenings (timestamp, candidate_name, job_title, overall_score, verdict, engine_used, filename, result_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        now_iso,
+        candidate_name,
+        job_title,
+        overall_score,
+        verdict,
+        engine_used,
+        filename,
+        json.dumps(result_data)
+    ))
+    record_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return record_id
+
+def get_history(limit: int = 50) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, timestamp, candidate_name, job_title, overall_score, verdict, engine_used, filename
+        FROM screenings
+        ORDER BY id DESC
+        LIMIT ?
+    """, (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [dict(row) for row in rows]
+
+def get_screening_by_id(record_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM screenings WHERE id = ?
+    """, (record_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        data = dict(row)
+        data["result_data"] = json.loads(data["result_json"])
+        return data
+    return None
+
+def delete_screening(record_id: int) -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM screenings WHERE id = ?", (record_id,))
+    rows_affected = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return rows_affected > 0
+
+def clear_all_history() -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM screenings")
+    conn.commit()
+    conn.close()
+    return True
